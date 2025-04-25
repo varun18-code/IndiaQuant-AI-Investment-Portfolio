@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Audio Recorder</title>
+  <style>
+    .recorder-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      margin: 10px 0;
+    }
+    .recorder-button {
+      width: 60px;
+      height: 60px;
+      border-radius: 50%;
+      background-color: #2575fc;
+      border: none;
+      outline: none;
+      cursor: pointer;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+      transition: all 0.3s ease;
+    }
+    .recorder-button:hover {
+      transform: scale(1.05);
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.25);
+    }
+    .recorder-button.recording {
+      background-color: #e74c3c;
+      animation: pulse 1.5s infinite;
+    }
+    .recorder-icon {
+      width: 24px;
+      height: 24px;
+      fill: white;
+    }
+    .recorder-status {
+      margin-top: 10px;
+      font-size: 14px;
+      color: #4a5568;
+    }
+    .recorder-timer {
+      margin-top: 5px;
+      font-size: 12px;
+      color: #718096;
+    }
+    @keyframes pulse {
+      0% {
+        transform: scale(1);
+      }
+      50% {
+        transform: scale(1.05);
+      }
+      100% {
+        transform: scale(1);
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="recorder-container">
+    <button class="recorder-button" id="recordButton">
+      <svg class="recorder-icon" id="micIcon" viewBox="0 0 24 24">
+        <path d="M12 14c1.66 0 2.99-1.34 2.99-3L15 5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.3-3c0 3-2.54 5.1-5.3 5.1S6.7 14 6.7 11H5c0 3.41 2.72 6.23 6 6.72V21h2v-3.28c3.28-.48 6-3.3 6-6.72h-1.7z"/>
+      </svg>
+      <svg class="recorder-icon" id="stopIcon" viewBox="0 0 24 24" style="display: none;">
+        <path d="M6 6h12v12H6z"/>
+      </svg>
+    </button>
+    <div class="recorder-status" id="status">Click to start recording</div>
+    <div class="recorder-timer" id="timer"></div>
+  </div>
+
+  <script>
+    // Streamlit communication
+    const Streamlit = window.parent.Streamlit;
+    const recordButton = document.getElementById('recordButton');
+    const micIcon = document.getElementById('micIcon');
+    const stopIcon = document.getElementById('stopIcon');
+    const status = document.getElementById('status');
+    const timer = document.getElementById('timer');
+    
+    let mediaRecorder;
+    let audioChunks = [];
+    let stream;
+    let startTime;
+    let timerInterval;
+    let isRecording = false;
+    
+    // Initialize
+    function onInit() {
+      Streamlit.setFrameHeight(100);
+      recordButton.addEventListener('click', toggleRecording);
+    }
+    
+    // Toggle recording state
+    async function toggleRecording() {
+      if (!isRecording) {
+        await startRecording();
+      } else {
+        stopRecording();
+      }
+    }
+    
+    // Start recording
+    async function startRecording() {
+      try {
+        // Request microphone access
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        
+        // Create media recorder
+        mediaRecorder = new MediaRecorder(stream);
+        
+        // Handle data available event
+        mediaRecorder.ondataavailable = (event) => {
+          audioChunks.push(event.data);
+        };
+        
+        // Handle recording stopped
+        mediaRecorder.onstop = () => {
+          // Combine audio chunks into a single blob
+          const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+          
+          // Convert to base64
+          const reader = new FileReader();
+          reader.readAsDataURL(audioBlob);
+          reader.onloadend = () => {
+            const base64data = reader.result.split(',')[1];
+            
+            // Send to Streamlit
+            Streamlit.setComponentValue(base64data);
+          };
+        };
+        
+        // Start recording
+        mediaRecorder.start();
+        audioChunks = [];
+        
+        // Update UI
+        recordButton.classList.add('recording');
+        micIcon.style.display = 'none';
+        stopIcon.style.display = 'block';
+        status.innerText = 'Recording...';
+        
+        // Start timer
+        startTime = new Date();
+        timerInterval = setInterval(updateTimer, 1000);
+        
+        isRecording = true;
+      } catch (error) {
+        console.error('Error starting recording:', error);
+        status.innerText = 'Error: ' + error.message;
+      }
+    }
+    
+    // Stop recording
+    function stopRecording() {
+      if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+        // Stop the media recorder
+        mediaRecorder.stop();
+        
+        // Stop all tracks on the stream
+        if (stream) {
+          stream.getTracks().forEach(track => track.stop());
+        }
+        
+        // Clear the timer
+        clearInterval(timerInterval);
+        
+        // Update UI
+        recordButton.classList.remove('recording');
+        micIcon.style.display = 'block';
+        stopIcon.style.display = 'none';
+        status.innerText = 'Processing...';
+        
+        isRecording = false;
+      }
+    }
+    
+    // Update timer display
+    function updateTimer() {
+      if (startTime) {
+        const elapsed = new Date() - startTime;
+        const seconds = Math.floor(elapsed / 1000);
+        const minutes = Math.floor(seconds / 60);
+        const remainingSeconds = seconds % 60;
+        
+        timer.innerText = `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
+      }
+    }
+    
+    // Initialize component
+    if (Streamlit) {
+      Streamlit.setComponentReady();
+      Streamlit.events.addEventListener(Streamlit.RENDER_EVENT, onInit);
+    }
+  </script>
+</body>
+</html>
